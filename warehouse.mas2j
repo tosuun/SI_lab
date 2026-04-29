@@ -1,0 +1,30 @@
+/*
+ * Multi-agent system for intelligent automated warehouse logistics.
+ * Intelligent Systems project.
+ * University of Vigo - 2025-2026
+ */
+
+MAS warehouse {
+
+    infrastructure: Centralised
+
+    environment: warehouse.WarehouseArtifact
+
+    agents:
+        // Warehouse robots
+        robot_light [beliefs="robot_type(light)", beliefs="max_weight(10)", beliefs="max_size(1,1)"];
+        robot_medium [beliefs="robot_type(medium)", beliefs="max_weight(30)", beliefs="max_size(1,2)"];
+        robot_heavy_1 [beliefs="robot_type(heavy)", beliefs="max_weight(100)", beliefs="max_size(2,3)"];
+        robot_heavy_2 [beliefs="robot_type(heavy)", beliefs="max_weight(100)", beliefs="max_size(2,3)"];
+        
+        // Scheduler agent
+        scheduler;
+        
+        // Supervisor agent
+        supervisor;
+
+        // External transport agent for outbound removal
+        transport;
+
+    aslSourcePath: "src/agt";
+}

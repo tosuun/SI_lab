@@ -1,0 +1,53 @@
+
+
+plugins {
+    id 'java'
+}
+
+defaultTasks 'run'
+
+version '1.0'
+group 'warehouse'
+
+repositories {
+    mavenCentral()
+    maven { url "https://raw.githubusercontent.com/jacamo-lang/mvn-repo/master" }
+}
+
+dependencies {
+    implementation 'io.github.jason-lang:jason-interpreter:3.3.0'
+    
+    implementation fileTree(dir: 'lib', include: '*.jar')
+}
+
+sourceSets {
+    main {
+        java {
+            srcDirs = ['src/env', 'src/java']
+        }
+        resources {
+            srcDirs = ['src/resources', 'src/agt']
+            include '**/*.asl'
+            include '**/*.xml'
+            include '**/*.mas2j'
+        }
+    }
+}
+
+task run (type: JavaExec, dependsOn: 'classes') {
+    group = 'Jason'
+    description 'runs the warehouse application'
+    
+    main = 'jason.infra.local.RunLocalMAS'
+    
+    args = ['warehouse.mas2j']
+    classpath = sourceSets.main.runtimeClasspath
+    
+    standardInput = System.in
+}
+
+clean {
+    delete 'bin'
+    delete 'default.mas2j'
+    delete 'build'
+}
