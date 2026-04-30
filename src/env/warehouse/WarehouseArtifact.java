@@ -59,7 +59,7 @@ public class WarehouseArtifact extends Environment {
     private Map<String, String> storageReservations;
     private Map<String, Double> reservedShelfWeight;
     private Map<String, Integer> reservedShelfVolume;
-    private Set<String> noSpaceReported;
+    private String lastOutputAgent;
     private final Object movementLock = new Object();
 
     private WarehouseView view;
@@ -86,7 +86,7 @@ public class WarehouseArtifact extends Environment {
         storageReservations = new ConcurrentHashMap<>();
         reservedShelfWeight = new ConcurrentHashMap<>();
         reservedShelfVolume = new ConcurrentHashMap<>();
-        noSpaceReported = ConcurrentHashMap.newKeySet();
+        lastOutputAgent = null;
 
         startTime = System.currentTimeMillis();
 
@@ -94,6 +94,7 @@ public class WarehouseArtifact extends Environment {
         initializeShelves();
         initializeShelfPolicy();
         initializeRobots();
+        refreshShelfPercepts();
 
         if (!GraphicsEnvironment.isHeadless()) {
             view = new WarehouseView(this, GRID_WIDTH, GRID_HEIGHT);
@@ -288,14 +289,12 @@ public class WarehouseArtifact extends Environment {
                     return executeDropAt(agName, action);
                 case "deliver":
                     return executeDeliver(agName, action);
-                case "check_storage":
-                    return executeCheckStorage(agName);
-                case "start_output_cycle":
-                    return executeStartOutputCycle(agName, action);
-                case "check_deadlines":
-                    return executeCheckDeadlines(agName);
-                case "check_output_cycles":
-                    return executeCheckOutputCycles(agName);
+                case "read_time":
+                    return executeReadTime(agName);
+                case "open_output_cycle":
+                    return executeOpenOutputCycle(action);
+                case "close_output_cycle":
+                    return executeCloseOutputCycle(action);
                 case "remove_outbound":
                     return executeRemoveOutbound(action);
                 case "scan_surroundings":
@@ -562,11 +561,16 @@ public class WarehouseArtifact extends Environment {
             addClaimFailed(agName, containerId);
             return true;
         }
+        if (agName.equals(lastOutputAgent) && hasOtherAvailableOutputRobot(agName, cycle)) {
+            addClaimFailed(agName, containerId);
+            return true;
+        }
 
         String shelfId = container.getAssignedShelf();
         container.setStatus("reserved_output");
         robot.setBusy(true);
         robot.setCurrentTask(containerId);
+        lastOutputAgent = agName;
         removeOutputCandidatePercept(container);
         System.out.println("Task accepted by " + agName + ": output " + containerId
             + " (" + container.getType() + ") from " + shelfId);
@@ -600,6 +604,7 @@ public class WarehouseArtifact extends Environment {
             Shelf shelf = shelves.get(container.getAssignedShelf());
             if (shelf != null) {
                 shelf.remove(containerId, container.getWeight(), container.getArea());
+                refreshShelfPercepts();
             }
             container.setAssignedShelf(null);
         }
@@ -686,33 +691,19 @@ public class WarehouseArtifact extends Environment {
         addPercept(agName, Literal.parseLiteral(
             "delivered(\"" + containerId + "\"," + currentTimeSeconds() + ")"
         ));
+        removeOutputPendingPercept(container);
         logView(containerId + " delivered to outbound");
         updateView();
         return true;
     }
 
-    private synchronized boolean executeCheckStorage(String agName) {
-        // The supervisor calls this to check if a type has no free space.
-        if (!activeCycles.isEmpty()) {
-            return true;
-        }
-
-        for (String type : Arrays.asList("urgent", "standard", "fragile")) {
-            if (!activeCycles.containsKey(type)
-                && !noSpaceReported.contains(type)
-                && hasPendingInboundWithoutShelf(type)) {
-                noSpaceReported.add(type);
-                addPercept(agName, Literal.parseLiteral(
-                    "no_space(" + type + "," + currentTimeSeconds() + ")"
-                ));
-            }
-        }
+    private boolean executeReadTime(String agName) {
+        removePerceptsByUnif(agName, Literal.parseLiteral("time(_)"));
+        addPercept(agName, Literal.parseLiteral("time(" + currentTimeSeconds() + ")"));
         return true;
     }
 
-    private synchronized boolean executeStartOutputCycle(String agName, Structure action) {
-        // The scheduler starts one output cycle for this type.
-        // The current time is T0.
+    private synchronized boolean executeOpenOutputCycle(Structure action) {
         String type = cleanId(action.getTerm(0).toString());
         if (!activeCycles.isEmpty()) {
             return true;
@@ -726,74 +717,35 @@ public class WarehouseArtifact extends Environment {
             .collect(Collectors.toList());
 
         if (cycleContainers.isEmpty()) {
-            noSpaceReported.remove(type);
             refreshInboundPercepts(type);
             return true;
         }
 
         int now = currentTimeSeconds();
-        int deadline = now + ("urgent".equals(type) ? DELTA_T_SECONDS : 3 * DELTA_T_SECONDS);
-        ActiveCycle cycle = new ActiveCycle(type, now, deadline, cycleContainers);
+        ActiveCycle cycle = new ActiveCycle(type, now, cycleContainers);
         activeCycles.put(type, cycle);
 
         removeInboundPercepts(type);
         addPercept(Literal.parseLiteral("cycle_active(" + type + ")"));
-        addPercept(agName, Literal.parseLiteral(
-            "cycle_started(" + type + "," + now + "," + deadline + ")"
-        ));
         for (String containerId : cycleContainers) {
             Container container = containers.get(containerId);
             if (container != null) {
                 publishOutputCandidate(container);
+                publishOutputPending(container);
             }
         }
         return true;
     }
 
-    private synchronized boolean executeCheckDeadlines(String agName) {
-        // Deadline errors are reported, but the system does not stop.
-        int now = currentTimeSeconds();
-        for (ActiveCycle cycle : activeCycles.values()) {
-            if (now <= cycle.deadlineSeconds) {
-                continue;
-            }
-            for (String containerId : cycle.containerIds) {
-                Container container = containers.get(containerId);
-                if (container == null
-                    || container.isDeadlineMissReported()
-                    || isDeliveredOrRemoved(container)) {
-                    continue;
-                }
-                container.setDeadlineMissReported(true);
-                addPercept(agName, Literal.parseLiteral(
-                    "deadline_missed(\"" + containerId + "\"," + cycle.type + "," + now + ")"
-                ));
-            }
-        }
-        return true;
-    }
-
-    private synchronized boolean executeCheckOutputCycles(String agName) {
-        // If all containers of the cycle are done, the cycle closes.
-        List<String> finishedTypes = new ArrayList<>();
-        for (ActiveCycle cycle : activeCycles.values()) {
-            boolean allDelivered = cycle.containerIds.stream()
-                .map(containers::get)
-                .allMatch(c -> c == null || isDeliveredOrRemoved(c));
-            if (allDelivered) {
-                finishedTypes.add(cycle.type);
-            }
-        }
-
-        for (String type : finishedTypes) {
+    private synchronized boolean executeCloseOutputCycle(Structure action) {
+        String type = cleanId(action.getTerm(0).toString());
+        if (activeCycles.containsKey(type)) {
             activeCycles.remove(type);
-            noSpaceReported.remove(type);
+            lastOutputAgent = null;
             removeCyclePercept(type);
             removeOutputPercepts(type);
+            removeOutputPendingPercepts(type);
             refreshInboundPercepts(type);
-            addPercept(agName, Literal.parseLiteral(
-                "cycle_finished(" + type + "," + currentTimeSeconds() + ")"
-            ));
         }
         return true;
     }
@@ -866,11 +818,15 @@ public class WarehouseArtifact extends Environment {
         return true;
     }
 
-    private boolean hasPendingInboundWithoutShelf(String type) {
-        return containers.values().stream()
-            .filter(c -> type.equals(c.getType()))
-            .filter(c -> "inbound".equals(c.getStatus()))
-            .anyMatch(c -> findShelfForType(c) == null);
+    private boolean hasOtherAvailableOutputRobot(String agName, ActiveCycle cycle) {
+        return robots.values().stream()
+            .filter(robot -> !robot.getId().equals(agName))
+            .filter(robot -> !robot.isBusy() && !robot.isCarrying())
+            .anyMatch(robot -> cycle.containerIds.stream()
+                .map(containers::get)
+                .anyMatch(container -> container != null
+                    && "stored".equals(container.getStatus())
+                    && robot.canCarry(container)));
     }
 
     private Shelf findShelfForType(Container container) {
@@ -900,6 +856,7 @@ public class WarehouseArtifact extends Environment {
         storageReservations.put(container.getId(), shelf.getId());
         reservedShelfWeight.merge(shelf.getId(), container.getWeight(), Double::sum);
         reservedShelfVolume.merge(shelf.getId(), container.getArea(), Integer::sum);
+        refreshShelfPercepts();
     }
 
     private void releaseShelfReservation(String containerId) {
@@ -919,6 +876,7 @@ public class WarehouseArtifact extends Environment {
         reservedShelfVolume.computeIfPresent(shelfId, (id, value) ->
             Math.max(0, value - container.getArea())
         );
+        refreshShelfPercepts();
     }
 
     private boolean isShelfAllowedForType(String shelfId, String type) {
@@ -976,6 +934,28 @@ public class WarehouseArtifact extends Environment {
         )));
     }
 
+    private void publishOutputPending(Container container) {
+        addPercept(Literal.parseLiteral(
+            "output_pending(\"" + container.getId() + "\"," + container.getType() + ")"
+        ));
+    }
+
+    private void refreshShelfPercepts() {
+        removePerceptsByUnif(Literal.parseLiteral("shelf_state(_,_,_)"));
+        for (Shelf shelf : shelves.values()) {
+            double reservedWeight = reservedShelfWeight.getOrDefault(shelf.getId(), 0.0);
+            int reservedVolume = reservedShelfVolume.getOrDefault(shelf.getId(), 0);
+            double freeWeight = Math.max(0.0, shelf.getMaxWeight() - shelf.getCurrentWeight() - reservedWeight);
+            int freeVolume = Math.max(0, shelf.getMaxVolume() - shelf.getCurrentVolume() - reservedVolume);
+            addPercept(Literal.parseLiteral(String.format(Locale.US,
+                "shelf_state(\"%s\",%.2f,%d)",
+                shelf.getId(),
+                freeWeight,
+                freeVolume
+            )));
+        }
+    }
+
     private void refreshInboundPercepts(String type) {
         removeInboundPercepts(type);
         containers.values().stream()
@@ -1002,6 +982,16 @@ public class WarehouseArtifact extends Environment {
 
     private void removeOutputPercepts(String type) {
         removePerceptsByUnif(Literal.parseLiteral("output_candidate(_,_,_,_," + type + ",_)"));
+    }
+
+    private void removeOutputPendingPercept(Container container) {
+        removePerceptsByUnif(Literal.parseLiteral(
+            "output_pending(\"" + container.getId() + "\",_)"
+        ));
+    }
+
+    private void removeOutputPendingPercepts(String type) {
+        removePerceptsByUnif(Literal.parseLiteral("output_pending(_," + type + ")"));
     }
 
     private void removeCyclePercept(String type) {
@@ -1089,13 +1079,11 @@ public class WarehouseArtifact extends Environment {
     private static class ActiveCycle {
         private final String type;
         private final int startSeconds;
-        private final int deadlineSeconds;
         private final Set<String> containerIds;
 
-        private ActiveCycle(String type, int startSeconds, int deadlineSeconds, List<String> containerIds) {
+        private ActiveCycle(String type, int startSeconds, List<String> containerIds) {
             this.type = type;
             this.startSeconds = startSeconds;
-            this.deadlineSeconds = deadlineSeconds;
             this.containerIds = new HashSet<>(containerIds);
         }
     }

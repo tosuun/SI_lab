@@ -7,8 +7,8 @@ environment. The environment keeps the physical information of the warehouse:
 the grid, the zones, the robots, the containers, the shelves and their
 positions. The agents decide what to do with this information.
 
-- `supervisor`: checks if there is storage space and checks missed deadlines.
-- `scheduler`: starts output cycles after a warning from the supervisor.
+- `supervisor`: checks shelf state and decides when there is no space. It also checks missed deadlines.
+- `scheduler`: calculates T0 and the deadline, then starts and closes output cycles.
 - `robot_light`, `robot_medium`, `robot_heavy_1`, `robot_heavy_2`: choose containers using their own capacity.
 - `transport`: removes containers from the outbound area, like an external truck.
 
@@ -26,9 +26,11 @@ The shelf policy is:
 - Standard and fragile containers: `S2`, `S3`, `S4`, `S6`, `S7`, `S9`.
 
 The environment checks this policy when a robot drops a container on a shelf.
-The scheduler and the supervisor do not give direct tasks to the robots. The
-robots see `container_available(...)` and `output_candidate(...)`, and then they
-try `claim_storage(...)` or `claim_output(...)` by themselves.
+It also publishes shelf state with `shelf_state(...)`. The supervisor uses this
+state to decide if there is no possible shelf for a waiting container. The
+scheduler and the supervisor do not give direct tasks to the robots. The robots
+see `container_available(...)` and `output_candidate(...)`, and then they try
+`claim_storage(...)` or `claim_output(...)` by themselves.
 
 Robots move in the grid step by step. The Java environment calculates a simple
 path and avoids shelves and blocked cells. Robot speed is represented with
@@ -49,8 +51,8 @@ the robot calls a recovery action, and the container becomes available again.
 
 ## Output Cycles And Deadlines
 
-When the supervisor sees that there is no free space for a container type, it
-prints:
+When the supervisor sees from `shelf_state(...)` that there is no free space for
+a container type, it prints:
 
 `EVENT | time=T | agent=supervisor | type=no_space_detected | data=container_type`
 
@@ -65,8 +67,9 @@ I allow only one output cycle at the same time. This makes the active deadline
 clear for the robots and avoids mixing different container types.
 
 I used `DeltaT = 30` seconds. This is short enough to see the behavior in a
-demo, but it still gives the robots time to move. Urgent containers expire at
-`T0 + DeltaT`. Non-urgent containers expire at `T0 + 3 * DeltaT`.
+demo, but it still gives the robots time to move. The scheduler calculates the
+deadline. Urgent containers expire at `T0 + DeltaT`. Non-urgent containers
+expire at `T0 + 3 * DeltaT`.
 
 ## Time Control
 
