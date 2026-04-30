@@ -1,3 +1,7 @@
+// Light robot agent.
+// It chooses tasks from visible containers and its own capacity.
+// (TR: scheduler gorev atamiyor, robot kendisi claim ediyor.)
+
 agent_id(robot_light).
 max_weight(10).
 max_size(1,1).
@@ -8,6 +12,7 @@ state(idle).
 +!start : true <-
     !work_cycle.
 
+// Output has priority when there is an output candidate.
 +!work_cycle
     : state(idle)
       & output_candidate(CId, W, H, Weight, Type, ShelfId)
@@ -21,6 +26,7 @@ state(idle).
     .wait(200);
     !work_cycle.
 
+// Otherwise it tries to store a compatible inbound container.
 +!work_cycle
     : state(idle)
       & container_available(CId, W, H, Weight, Type)
@@ -38,6 +44,7 @@ state(idle).
     .wait(800);
     !work_cycle.
 
+// Storage path: inbound -> classification -> shelf -> parking.
 +storage_task(CId, ShelfId) : state(claiming) <-
     -+state(working);
     !go_inbound;
@@ -48,6 +55,7 @@ state(idle).
     !go_park;
     -+state(idle).
 
+// Output path: shelf -> outbound -> parking.
 +output_task(CId, ShelfId, Type) : state(claiming) <-
     -+state(working);
     !go_shelf(ShelfId);
@@ -57,6 +65,7 @@ state(idle).
     !go_park;
     -+state(idle).
 
+// Required delivery event.
 +delivered(CId, T) : agent_id(Agent) <-
     .print("EVENT | time=", T, " | agent=", Agent, " | type=container_delivered | data=", CId).
 

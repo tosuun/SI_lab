@@ -1,3 +1,7 @@
+// Heavy robot agent instance 1.
+// It chooses tasks from visible containers and its own capacity.
+// (TR: iki heavy robot ayni mantikla ama ayri instance olarak calisir.)
+
 agent_id(robot_heavy_1).
 max_weight(100).
 max_size(2,3).
@@ -8,6 +12,7 @@ state(idle).
 +!start : true <-
     !work_cycle.
 
+// Output has priority when there is an output candidate.
 +!work_cycle
     : state(idle)
       & output_candidate(CId, W, H, Weight, Type, ShelfId)
@@ -21,6 +26,7 @@ state(idle).
     .wait(350);
     !work_cycle.
 
+// Otherwise it tries to store a compatible inbound container.
 +!work_cycle
     : state(idle)
       & container_available(CId, W, H, Weight, Type)
@@ -38,6 +44,7 @@ state(idle).
     .wait(1000);
     !work_cycle.
 
+// Storage path: inbound -> classification -> shelf -> parking.
 +storage_task(CId, ShelfId) : state(claiming) <-
     -+state(working);
     !go_inbound;
@@ -48,6 +55,7 @@ state(idle).
     !go_park;
     -+state(idle).
 
+// Output path: shelf -> outbound -> parking.
 +output_task(CId, ShelfId, Type) : state(claiming) <-
     -+state(working);
     !go_shelf(ShelfId);
@@ -57,6 +65,7 @@ state(idle).
     !go_park;
     -+state(idle).
 
+// Required delivery event.
 +delivered(CId, T) : agent_id(Agent) <-
     .print("EVENT | time=", T, " | agent=", Agent, " | type=container_delivered | data=", CId).
 

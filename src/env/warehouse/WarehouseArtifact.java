@@ -28,12 +28,16 @@ import java.util.stream.Collectors;
 /**
  * Warehouse environment.
  *
- * The environment keeps spatial and physical state, exposes observable
- * candidates, and provides atomic state transitions such as claiming,
- * pickup, shelf drop and outbound delivery.
+ * This class keeps the physical state of the warehouse and gives percepts to
+ * the agents.
+ *
+ * Agents decide what to do. The environment only checks if the physical action
+ * is possible and then updates the state. (TR: ajan karar verir, environment
+ * fiziksel kurallari kontrol eder.)
  */
 public class WarehouseArtifact extends Environment {
 
+    // Basic layout and time values.
     private static final int GRID_WIDTH = 20;
     private static final int GRID_HEIGHT = 15;
     private static final int INBOUND_X = 1;
@@ -43,10 +47,13 @@ public class WarehouseArtifact extends Environment {
     private static final int DELTA_T_SECONDS = 30;
     private static final int MAX_REPATH_ATTEMPTS = 250;
 
+    // Main warehouse state.
     private CellType[][] grid;
     private Map<String, Robot> robots;
     private Map<String, Container> containers;
     private Map<String, Shelf> shelves;
+
+    // Extra state for tasks, reservations and output cycles.
     private Map<String, List<String>> shelfPolicy;
     private Map<String, ActiveCycle> activeCycles;
     private Map<String, String> storageReservations;
@@ -104,6 +111,8 @@ public class WarehouseArtifact extends Environment {
     }
 
     private void initializeGrid() {
+        // Inbound is on the left, classification is in the middle, and outbound
+        // is on the bottom-right.
         for (int x = 0; x < GRID_WIDTH; x++) {
             for (int y = 0; y < GRID_HEIGHT; y++) {
                 grid[x][y] = CellType.EMPTY;
@@ -130,6 +139,7 @@ public class WarehouseArtifact extends Environment {
     }
 
     private void initializeShelves() {
+        // Shelves have different capacities, so the demo is easier to see.
         int shelfId = 1;
 
         for (int x = 10; x < 18; x += 2) {
@@ -158,6 +168,9 @@ public class WarehouseArtifact extends Environment {
     }
 
     private void initializeShelfPolicy() {
+        // Shelf rule from the assignment.
+        // Urgent has its own shelves. Standard and fragile share the others.
+        // (TR: raf politikasini burada anlat.)
         List<String> urgentShelves = Arrays.asList("shelf_1", "shelf_5", "shelf_8");
         List<String> normalShelves = Arrays.asList(
             "shelf_2", "shelf_3", "shelf_4", "shelf_6", "shelf_7", "shelf_9"
@@ -169,6 +182,7 @@ public class WarehouseArtifact extends Environment {
     }
 
     private void initializeRobots() {
+        // These capacities are also written as beliefs in the .mas2j file.
         addRobot("robot_light", "light", 10, 1, 1, 3, 1, 3);
         addRobot("robot_medium", "medium", 30, 1, 2, 2, 2, 3);
         addRobot("robot_heavy_1", "heavy", 100, 2, 3, 1, 3, 3);
@@ -183,6 +197,7 @@ public class WarehouseArtifact extends Environment {
     }
 
     private void startContainerGenerator() {
+        // Random arrivals keep the system running.
         containerGeneratorExecutor = Executors.newSingleThreadExecutor(r -> {
             Thread t = new Thread(r, "ContainerGenerator");
             t.setDaemon(true);
@@ -210,6 +225,7 @@ public class WarehouseArtifact extends Environment {
     }
 
     private Container generateRandomContainer() {
+        // Most containers are standard. Fragile and urgent appear less often.
         Random rand = new Random();
         String id = "container_" + (++containerCounter);
         int[][] sizes = {{1, 1}, {1, 2}, {2, 2}, {2, 3}};
@@ -257,6 +273,7 @@ public class WarehouseArtifact extends Environment {
 
     @Override
     public boolean executeAction(String agName, Structure action) {
+        // Jason agents call actions here.
         try {
             switch (action.getFunctor()) {
                 case "move_to":
@@ -296,6 +313,7 @@ public class WarehouseArtifact extends Environment {
     }
 
     private boolean executeMoveTo(String agName, Structure action) throws Exception {
+        // Movement is step by step, so it is visible in the GUI.
         int targetX = (int) ((NumberTerm) action.getTerm(0)).solve();
         int targetY = (int) ((NumberTerm) action.getTerm(1)).solve();
         Robot robot = robots.get(agName);
@@ -484,6 +502,9 @@ public class WarehouseArtifact extends Environment {
     }
 
     private synchronized boolean executeClaimStorage(String agName, Structure action) {
+        // Robots are not assigned directly. They see a container and try to
+        // claim it. Only one robot can win the claim.
+        // (TR: ozerklik kismini burada anlatabilirsin.)
         String containerId = cleanId(action.getTerm(0).toString());
         Robot robot = robots.get(agName);
         Container container = containers.get(containerId);
@@ -495,7 +516,7 @@ public class WarehouseArtifact extends Environment {
         if (robot.isBusy()
             || robot.isCarrying()
             || !"inbound".equals(container.getStatus())
-            || !activeCycles.isEmpty()
+            || activeCycles.containsKey(container.getType())
             || !robot.canCarry(container)) {
             addClaimFailed(agName, containerId);
             return true;
@@ -512,8 +533,10 @@ public class WarehouseArtifact extends Environment {
         robot.setBusy(true);
         robot.setCurrentTask(containerId);
         removeInboundContainerPercept(container);
-        System.out.println("Task accepted by " + agName + ": store " + containerId + " -> " + shelf.getId());
-        logView(agName + " accepted storage task: " + containerId + " -> " + shelf.getId());
+        System.out.println("Task accepted by " + agName + ": store " + containerId
+            + " (" + container.getType() + ") -> " + shelf.getId());
+        logView(agName + " accepted storage task: " + containerId
+            + " (" + container.getType() + ") -> " + shelf.getId());
         addPercept(agName, Literal.parseLiteral(
             "storage_task(\"" + containerId + "\",\"" + shelf.getId() + "\")"
         ));
@@ -521,6 +544,7 @@ public class WarehouseArtifact extends Environment {
     }
 
     private synchronized boolean executeClaimOutput(String agName, Structure action) {
+        // Output claims only work for the active cycle type.
         String containerId = cleanId(action.getTerm(0).toString());
         Robot robot = robots.get(agName);
         Container container = containers.get(containerId);
@@ -544,8 +568,10 @@ public class WarehouseArtifact extends Environment {
         robot.setBusy(true);
         robot.setCurrentTask(containerId);
         removeOutputCandidatePercept(container);
-        System.out.println("Task accepted by " + agName + ": output " + containerId + " from " + shelfId);
-        logView(agName + " accepted output task: " + containerId + " from " + shelfId);
+        System.out.println("Task accepted by " + agName + ": output " + containerId
+            + " (" + container.getType() + ") from " + shelfId);
+        logView(agName + " accepted output task: " + containerId
+            + " (" + container.getType() + ") from " + shelfId);
         addPercept(agName, Literal.parseLiteral(
             "output_task(\"" + containerId + "\",\"" + shelfId + "\"," + container.getType() + ")"
         ));
@@ -666,6 +692,11 @@ public class WarehouseArtifact extends Environment {
     }
 
     private synchronized boolean executeCheckStorage(String agName) {
+        // The supervisor calls this to check if a type has no free space.
+        if (!activeCycles.isEmpty()) {
+            return true;
+        }
+
         for (String type : Arrays.asList("urgent", "standard", "fragile")) {
             if (!activeCycles.containsKey(type)
                 && !noSpaceReported.contains(type)
@@ -680,8 +711,10 @@ public class WarehouseArtifact extends Environment {
     }
 
     private synchronized boolean executeStartOutputCycle(String agName, Structure action) {
+        // The scheduler starts one output cycle for this type.
+        // The current time is T0.
         String type = cleanId(action.getTerm(0).toString());
-        if (activeCycles.containsKey(type)) {
+        if (!activeCycles.isEmpty()) {
             return true;
         }
 
@@ -703,7 +736,7 @@ public class WarehouseArtifact extends Environment {
         ActiveCycle cycle = new ActiveCycle(type, now, deadline, cycleContainers);
         activeCycles.put(type, cycle);
 
-        removeAllInboundPercepts();
+        removeInboundPercepts(type);
         addPercept(Literal.parseLiteral("cycle_active(" + type + ")"));
         addPercept(agName, Literal.parseLiteral(
             "cycle_started(" + type + "," + now + "," + deadline + ")"
@@ -718,6 +751,7 @@ public class WarehouseArtifact extends Environment {
     }
 
     private synchronized boolean executeCheckDeadlines(String agName) {
+        // Deadline errors are reported, but the system does not stop.
         int now = currentTimeSeconds();
         for (ActiveCycle cycle : activeCycles.values()) {
             if (now <= cycle.deadlineSeconds) {
@@ -740,6 +774,7 @@ public class WarehouseArtifact extends Environment {
     }
 
     private synchronized boolean executeCheckOutputCycles(String agName) {
+        // If all containers of the cycle are done, the cycle closes.
         List<String> finishedTypes = new ArrayList<>();
         for (ActiveCycle cycle : activeCycles.values()) {
             boolean allDelivered = cycle.containerIds.stream()
@@ -755,9 +790,7 @@ public class WarehouseArtifact extends Environment {
             noSpaceReported.remove(type);
             removeCyclePercept(type);
             removeOutputPercepts(type);
-            if (activeCycles.isEmpty()) {
-                refreshAllInboundPercepts();
-            }
+            refreshInboundPercepts(type);
             addPercept(agName, Literal.parseLiteral(
                 "cycle_finished(" + type + "," + currentTimeSeconds() + ")"
             ));
@@ -912,7 +945,9 @@ public class WarehouseArtifact extends Environment {
     }
 
     private void publishInboundContainer(Container container) {
-        if (!"inbound".equals(container.getStatus()) || !activeCycles.isEmpty()) {
+        // Robots use this percept to choose storage tasks.
+        if (!"inbound".equals(container.getStatus())
+            || activeCycles.containsKey(container.getType())) {
             return;
         }
         addPercept(Literal.parseLiteral(String.format(Locale.US,
@@ -926,6 +961,7 @@ public class WarehouseArtifact extends Environment {
     }
 
     private void publishOutputCandidate(Container container) {
+        // Robots use this percept to choose output tasks.
         if (!"stored".equals(container.getStatus()) || container.getAssignedShelf() == null) {
             return;
         }
@@ -946,17 +982,6 @@ public class WarehouseArtifact extends Environment {
             .filter(c -> type.equals(c.getType()))
             .filter(c -> "inbound".equals(c.getStatus()))
             .forEach(this::publishInboundContainer);
-    }
-
-    private void refreshAllInboundPercepts() {
-        removeAllInboundPercepts();
-        containers.values().stream()
-            .filter(c -> "inbound".equals(c.getStatus()))
-            .forEach(this::publishInboundContainer);
-    }
-
-    private void removeAllInboundPercepts() {
-        removePerceptsByUnif(Literal.parseLiteral("container_available(_,_,_,_,_)"));
     }
 
     private void removeInboundPercepts(String type) {
