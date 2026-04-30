@@ -1,17 +1,19 @@
 // Medium robot agent.
 // It chooses tasks from visible containers and its own capacity.
-// (TR: scheduler gorev atamiyor, robot kendisi claim ediyor.)
 
+// Beliefs: local robot identity, capacity and state.
 agent_id(robot_medium).
 max_weight(30).
 max_size(1,2).
 state(idle).
 
+// Desire/goal: start the continuous work cycle.
 !start.
 
 +!start : true <-
     !work_cycle.
 
+// Plans/intentions: choose and execute one task depending on current beliefs.
 // Output has priority when there is an output candidate.
 +!work_cycle
     : state(idle)

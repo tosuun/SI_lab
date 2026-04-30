@@ -32,8 +32,7 @@ import java.util.stream.Collectors;
  * the agents.
  *
  * Agents decide what to do. The environment only checks if the physical action
- * is possible and then updates the state. (TR: ajan karar verir, environment
- * fiziksel kurallari kontrol eder.)
+ * is possible and then updates the state.
  */
 public class WarehouseArtifact extends Environment {
 
@@ -171,7 +170,6 @@ public class WarehouseArtifact extends Environment {
     private void initializeShelfPolicy() {
         // Shelf rule from the assignment.
         // Urgent has its own shelves. Standard and fragile share the others.
-        // (TR: raf politikasini burada anlat.)
         List<String> urgentShelves = Arrays.asList("shelf_1", "shelf_5", "shelf_8");
         List<String> normalShelves = Arrays.asList(
             "shelf_2", "shelf_3", "shelf_4", "shelf_6", "shelf_7", "shelf_9"
@@ -503,7 +501,6 @@ public class WarehouseArtifact extends Environment {
     private synchronized boolean executeClaimStorage(String agName, Structure action) {
         // Robots are not assigned directly. They see a container and try to
         // claim it. Only one robot can win the claim.
-        // (TR: ozerklik kismini burada anlatabilirsin.)
         String containerId = cleanId(action.getTerm(0).toString());
         Robot robot = robots.get(agName);
         Container container = containers.get(containerId);

@@ -1,7 +1,8 @@
 // Supervisor agent.
 // It checks storage space and deadlines.
-// It does not give tasks to robots. (TR: sadece kontrol ve izleme)
+// It does not give tasks to robots.
 
+// Beliefs: shelf policy used to decide if a container type has space.
 allowed_shelf(urgent,"shelf_1").
 allowed_shelf(urgent,"shelf_5").
 allowed_shelf(urgent,"shelf_8").
@@ -18,6 +19,7 @@ allowed_shelf(fragile,"shelf_6").
 allowed_shelf(fragile,"shelf_7").
 allowed_shelf(fragile,"shelf_9").
 
+// Rule belief: true when at least one allowed shelf can store the container.
 storage_possible(Type,W,H,Weight) :-
     allowed_shelf(Type,Shelf)
     & shelf_state(Shelf,FreeWeight,FreeVolume)
@@ -25,11 +27,13 @@ storage_possible(Type,W,H,Weight) :-
     & Weight <= FreeWeight
     & Area <= FreeVolume.
 
+// Desire/goal: keep monitoring the warehouse.
 !start.
 
 +!start : true <-
     !monitor.
 
+// Plans/intentions: check storage and deadlines using current beliefs.
 // Main loop.
 +!monitor : true <-
     !check_storage;

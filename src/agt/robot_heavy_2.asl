@@ -1,17 +1,19 @@
 // Heavy robot agent instance 2.
 // It chooses tasks from visible containers and its own capacity.
-// (TR: iki heavy robot ayni mantikla ama ayri instance olarak calisir.)
 
+// Beliefs: local robot identity, capacity and state.
 agent_id(robot_heavy_2).
 max_weight(100).
 max_size(2,3).
 state(idle).
 
+// Desire/goal: start the continuous work cycle.
 !start.
 
 +!start : true <-
     !work_cycle.
 
+// Plans/intentions: choose and execute one task depending on current beliefs.
 // Output has priority when there is an output candidate.
 +!work_cycle
     : state(idle)

@@ -86,5 +86,5 @@ Create a ZIP with the complete `warehouse/` folder and `doc/memoria.pdf`.
 Suggested name:
 
 ```text
-warehouse_groupXX.zip
+warehouse.zip
 ```

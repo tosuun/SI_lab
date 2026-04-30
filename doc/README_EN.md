@@ -30,7 +30,7 @@ Before delivering, verify:
 - [ ] System runs correctly (`jason warehouse.mas2j`)
 - [ ] No compilation errors
 - [ ] Robots perform tasks correctly
-- [ ] Scheduler assigns tasks appropriately
+- [ ] Scheduler manages output cycles and deadlines
 - [ ] Supervisor monitors the system
 - [ ] Error handling works
 
@@ -148,4 +148,3 @@ Members:
 
 Date: [Delivery date]
 ```
-
