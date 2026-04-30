@@ -36,6 +36,7 @@ storage_possible(Type,W,H,Weight) :-
 // Plans/intentions: check storage and deadlines using current beliefs.
 // Main loop.
 +!monitor : true <-
+    read_time;
     !check_storage;
     !check_deadlines;
     .wait(1000);
@@ -45,6 +46,8 @@ storage_possible(Type,W,H,Weight) :-
 +!check_storage
     : not cycle_active(_)
       & container_available(CId,W,H,Weight,Type)
+      & stored_type(Type)
+      & not storage_busy(Type)
       & not no_space_reported(Type)
       & not storage_possible(Type,W,H,Weight) <-
     read_time;

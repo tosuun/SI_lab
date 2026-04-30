@@ -58,7 +58,6 @@ public class WarehouseArtifact extends Environment {
     private Map<String, String> storageReservations;
     private Map<String, Double> reservedShelfWeight;
     private Map<String, Integer> reservedShelfVolume;
-    private String lastOutputAgent;
     private final Object movementLock = new Object();
 
     private WarehouseView view;
@@ -85,7 +84,6 @@ public class WarehouseArtifact extends Environment {
         storageReservations = new ConcurrentHashMap<>();
         reservedShelfWeight = new ConcurrentHashMap<>();
         reservedShelfVolume = new ConcurrentHashMap<>();
-        lastOutputAgent = null;
 
         startTime = System.currentTimeMillis();
 
@@ -94,6 +92,7 @@ public class WarehouseArtifact extends Environment {
         initializeShelfPolicy();
         initializeRobots();
         refreshShelfPercepts();
+        refreshStoredTypePercepts();
 
         if (!GraphicsEnvironment.isHeadless()) {
             view = new WarehouseView(this, GRID_WIDTH, GRID_HEIGHT);
@@ -558,16 +557,10 @@ public class WarehouseArtifact extends Environment {
             addClaimFailed(agName, containerId);
             return true;
         }
-        if (agName.equals(lastOutputAgent) && hasOtherAvailableOutputRobot(agName, cycle)) {
-            addClaimFailed(agName, containerId);
-            return true;
-        }
-
         String shelfId = container.getAssignedShelf();
         container.setStatus("reserved_output");
         robot.setBusy(true);
         robot.setCurrentTask(containerId);
-        lastOutputAgent = agName;
         removeOutputCandidatePercept(container);
         System.out.println("Task accepted by " + agName + ": output " + containerId
             + " (" + container.getType() + ") from " + shelfId);
@@ -602,6 +595,7 @@ public class WarehouseArtifact extends Environment {
             if (shelf != null) {
                 shelf.remove(containerId, container.getWeight(), container.getArea());
                 refreshShelfPercepts();
+                refreshStoredTypePercepts();
             }
             container.setAssignedShelf(null);
         }
@@ -654,6 +648,7 @@ public class WarehouseArtifact extends Environment {
         addPercept(agName, Literal.parseLiteral(
             "stored(\"" + container.getId() + "\",\"" + shelfId + "\")"
         ));
+        refreshStoredTypePercepts();
         logView(container.getId() + " stored at " + shelfId);
         updateView();
         return true;
@@ -689,12 +684,14 @@ public class WarehouseArtifact extends Environment {
             "delivered(\"" + containerId + "\"," + currentTimeSeconds() + ")"
         ));
         removeOutputPendingPercept(container);
+        refreshStoredTypePercepts();
         logView(containerId + " delivered to outbound");
         updateView();
         return true;
     }
 
     private boolean executeReadTime(String agName) {
+        refreshStatePercepts();
         removePerceptsByUnif(agName, Literal.parseLiteral("time(_)"));
         addPercept(agName, Literal.parseLiteral("time(" + currentTimeSeconds() + ")"));
         return true;
@@ -731,6 +728,7 @@ public class WarehouseArtifact extends Environment {
                 publishOutputPending(container);
             }
         }
+        updateView();
         return true;
     }
 
@@ -738,11 +736,11 @@ public class WarehouseArtifact extends Environment {
         String type = cleanId(action.getTerm(0).toString());
         if (activeCycles.containsKey(type)) {
             activeCycles.remove(type);
-            lastOutputAgent = null;
             removeCyclePercept(type);
             removeOutputPercepts(type);
             removeOutputPendingPercepts(type);
             refreshInboundPercepts(type);
+            updateView();
         }
         return true;
     }
@@ -759,6 +757,7 @@ public class WarehouseArtifact extends Environment {
             containers.remove(containerId);
             totalRemoved++;
         }
+        refreshStoredTypePercepts();
         updateView();
         return true;
     }
@@ -813,17 +812,6 @@ public class WarehouseArtifact extends Environment {
         robot.setCurrentTask(null);
         removePerceptsByUnif(agName, Literal.parseLiteral("picked(_)"));
         return true;
-    }
-
-    private boolean hasOtherAvailableOutputRobot(String agName, ActiveCycle cycle) {
-        return robots.values().stream()
-            .filter(robot -> !robot.getId().equals(agName))
-            .filter(robot -> !robot.isBusy() && !robot.isCarrying())
-            .anyMatch(robot -> cycle.containerIds.stream()
-                .map(containers::get)
-                .anyMatch(container -> container != null
-                    && "stored".equals(container.getStatus())
-                    && robot.canCarry(container)));
     }
 
     private Shelf findShelfForType(Container container) {
@@ -920,7 +908,7 @@ public class WarehouseArtifact extends Environment {
         if (!"stored".equals(container.getStatus()) || container.getAssignedShelf() == null) {
             return;
         }
-        addPercept(Literal.parseLiteral(String.format(Locale.US,
+        Literal candidate = Literal.parseLiteral(String.format(Locale.US,
             "output_candidate(\"%s\",%d,%d,%.2f,%s,\"%s\")",
             container.getId(),
             container.getWidth(),
@@ -928,7 +916,11 @@ public class WarehouseArtifact extends Environment {
             container.getWeight(),
             container.getType(),
             container.getAssignedShelf()
-        )));
+        ));
+        addPercept(candidate);
+        for (String robotId : robots.keySet()) {
+            addPercept(robotId, candidate);
+        }
     }
 
     private void publishOutputPending(Container container) {
@@ -953,6 +945,52 @@ public class WarehouseArtifact extends Environment {
         }
     }
 
+    private void refreshStoredTypePercepts() {
+        removePerceptsByUnif(Literal.parseLiteral("stored_type(_)"));
+        containers.values().stream()
+            .filter(c -> "stored".equals(c.getStatus()))
+            .map(Container::getType)
+            .distinct()
+            .forEach(type -> addPercept(Literal.parseLiteral("stored_type(" + type + ")")));
+    }
+
+    private void refreshStatePercepts() {
+        refreshShelfPercepts();
+        refreshStoredTypePercepts();
+        refreshStorageBusyPercepts();
+        refreshAllInboundPercepts();
+        refreshActiveOutputPercepts();
+    }
+
+    private void refreshStorageBusyPercepts() {
+        removePerceptsByUnif(Literal.parseLiteral("storage_busy(_)"));
+        storageReservations.keySet().stream()
+            .map(containers::get)
+            .filter(container -> container != null)
+            .map(Container::getType)
+            .distinct()
+            .forEach(type -> addPercept(Literal.parseLiteral("storage_busy(" + type + ")")));
+    }
+
+    private void refreshAllInboundPercepts() {
+        removePerceptsByUnif(Literal.parseLiteral("container_available(_,_,_,_,_)"));
+        containers.values().stream()
+            .filter(c -> "inbound".equals(c.getStatus()))
+            .forEach(this::publishInboundContainer);
+    }
+
+    private void refreshActiveOutputPercepts() {
+        for (ActiveCycle cycle : activeCycles.values()) {
+            removeOutputPercepts(cycle.type);
+            for (String containerId : cycle.containerIds) {
+                Container container = containers.get(containerId);
+                if (container != null && "stored".equals(container.getStatus())) {
+                    publishOutputCandidate(container);
+                }
+            }
+        }
+    }
+
     private void refreshInboundPercepts(String type) {
         removeInboundPercepts(type);
         containers.values().stream()
@@ -972,13 +1010,21 @@ public class WarehouseArtifact extends Environment {
     }
 
     private void removeOutputCandidatePercept(Container container) {
-        removePerceptsByUnif(Literal.parseLiteral(
+        Literal pattern = Literal.parseLiteral(
             "output_candidate(\"" + container.getId() + "\",_,_,_,_,_)"
-        ));
+        );
+        removePerceptsByUnif(pattern);
+        for (String robotId : robots.keySet()) {
+            removePerceptsByUnif(robotId, pattern);
+        }
     }
 
     private void removeOutputPercepts(String type) {
-        removePerceptsByUnif(Literal.parseLiteral("output_candidate(_,_,_,_," + type + ",_)"));
+        Literal pattern = Literal.parseLiteral("output_candidate(_,_,_,_," + type + ",_)");
+        removePerceptsByUnif(pattern);
+        for (String robotId : robots.keySet()) {
+            removePerceptsByUnif(robotId, pattern);
+        }
     }
 
     private void removeOutputPendingPercept(Container container) {

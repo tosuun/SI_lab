@@ -18,6 +18,13 @@ delta_t(30).
     ?time(T0);
     !deadline_for(Type,T0,Deadline);
     open_output_cycle(Type);
+    .wait(500);
+    !confirm_cycle(Type,T0,Deadline).
+
++!activate_output_cycle(Type) : true <-
+    true.
+
++!confirm_cycle(Type,T0,Deadline) : cycle_active(Type) <-
     +active_cycle(Type,Deadline);
     .print("EVENT | time=", T0, " | agent=scheduler | type=output_phase_started | data=", Type);
     .print("EVENT | time=", T0, " | agent=scheduler | type=deadline_started | data=", Type);
@@ -26,8 +33,8 @@ delta_t(30).
     .wait(1500);
     +cycle_ready(Type).
 
-+!activate_output_cycle(Type) : true <-
-    true.
++!confirm_cycle(Type,T0,Deadline) : true <-
+    .send(supervisor, tell, cycle_closed(Type)).
 
 +!deadline_for(urgent,T0,Deadline) : delta_t(DT) <-
     Deadline = T0 + DT.

@@ -31,6 +31,7 @@ state(idle).
 // Otherwise it tries to store a compatible inbound container.
 +!work_cycle
     : state(idle)
+      & not cycle_active(_)
       & container_available(CId, W, H, Weight, Type)
       & max_weight(MaxWeight)
       & max_size(MaxW, MaxH)
