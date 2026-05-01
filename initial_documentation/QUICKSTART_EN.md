@@ -1,213 +1,69 @@
-# **Warehouse Management System - Quick Start Guide**
+# Quick Start
 
----
+## Run
 
-## 5-Minute Start
-
-### 1. Verify Installation
+From the project root:
 
 ```bash
-# Check Java
-java -version
-# Should show Java 11 or higher
-
-# Navigate to project
-cd warehouse
-
-# List files
-ls -la
-```
-
-### 2. Run the System
-
-```bash
-# Option 1: From terminal
 jason warehouse.mas2j
-
-# Option 2: From Jason directly
-# Open Jason GUI and load warehouse.mas2j
 ```
 
-### 3. Observe the System
+This starts the Jason MAS defined in `warehouse.mas2j`.
 
-When running, you will see:
+Alternative with Gradle:
 
-1. **2D visualization window**: Shows the warehouse with robots and containers
-2. **Jason console**: Shows agent logs
-3. **Information panel**: Real-time statistics
-
-**Initial behavior:**
-- Agents have empty templates, so they won't do much
-- Containers will be generated every 5-10 seconds
-- Robots will print messages but won't act
-
----
-
-## Your First Implementation (30 minutes)
-
-### Step 1: Basic Robot (10 min)
-
-Open `src/agt/robot_light.asl` and uncomment/implement:
-
-```asl
-// 1. Initial plan
-+!start : true <-
-    .print("Light robot started");
-    !request_next_task.
-
-// 2. Request tasks
-+!request_next_task : state(idle) <-
-    request_task();
-    .wait(2000);
-    !request_next_task.
-
-// 3. React to task
-+task(CId, ShelfId) : true <-
-    .print("Task received: ", CId, " -> ", ShelfId);
-    get_container_info(CId);
-    // For now, just log
-    true.
+```bash
+gradle run
 ```
 
-**Run and verify:**
-- ✓ Robot prints "started"
-- ✓ Robot requests tasks periodically
+## Expected Result
 
-### Step 2: Basic Scheduler (10 min)
+- The environment starts.
+- A GUI opens if the machine is not running in headless mode.
+- Containers appear in inbound.
+- Four robots are created: `robot_light`, `robot_medium`, `robot_heavy_1` and
+  `robot_heavy_2`.
+- Robots claim compatible storage tasks and move containers to shelves.
+- When a type has no storage space, an output cycle starts.
 
-Open `src/agt/scheduler.asl`:
+## Quick Checks
 
-```asl
-// 1. React to new container
-+new_container(CId) : true <-
-    .print("New container: ", CId);
-    get_container_info(CId);
-    true.
+Check the console for lines like:
 
-// 2. Receive info and classify
-+container_info(CId, W, H, Weight, Type) : true <-
-    .print("Info: ", CId, " - ", Weight, "kg");
-    +pending_container(CId, Weight).
+```text
+EVENT | time=T | agent=supervisor | type=no_space_detected | data=standard
+EVENT | time=T | agent=scheduler | type=output_phase_started | data=standard
+EVENT | time=T | agent=robot_medium | type=container_delivered | data=container_1
 ```
 
-**Run and verify:**
-- ✓ Scheduler detects new containers
-- ✓ Gets information correctly
+## Current Task Flow
 
-### Step 3: Scheduler-Robot Connection (10 min)
+Storage:
 
-In `scheduler.asl`, add simple assignment:
-
-```asl
-+container_info(CId, W, H, Weight, Type) : true <-
-    .print("Classifying ", CId);
-    
-    // Assign to appropriate robot
-    if (Weight <= 10) {
-        .print("Assigning to robot_light");
-        // Note: This is a simplification
-        // Scheduler should check availability
-    }.
+```text
+container_available(...)
+robot -> claim_storage(CId)
+environment -> storage_task(CId,ShelfId)
+robot -> pickup(CId)
+robot -> drop_at(ShelfId)
 ```
 
-In `robot_light.asl`, complete the task:
+Output:
 
-```asl
-+task(CId, ShelfId) : true <-
-    .print("Executing task: ", CId);
-    
-    // Step 1: Go to container (simplified)
-    move_to(1, 1);  // Approximate position
-    .wait(1000);
-    
-    // Step 2: Pick up
-    pickup(CId);
-    .wait(1000);
-    
-    // Step 3: Go to shelf (simplified)
-    move_to(10, 2);
-    .wait(1000);
-    
-    // Step 4: Drop
-    drop_at(ShelfId).
+```text
+output_candidate(...)
+robot -> claim_output(CId)
+environment -> output_task(CId,ShelfId,Type)
+robot -> pickup(CId)
+robot -> deliver(CId)
 ```
 
-**Run and verify:**
-- ✓ Robot receives task
-- ✓ Robot moves (see in GUI)
-- ✓ Robot picks up container
-- ✓ Robot drops at shelf
+The scheduler opens output cycles, but it does not directly assign containers
+to robots.
 
----
+## If It Does Not Start
 
-## Next Steps
-
-### After the Quick Start
-
-1. **Implement complete logic** for all three robot types
-2. **Improve scheduler** with availability checking
-3. **Add supervisor** for error handling
-4. **Optimize** task assignment
-5. **Test** edge cases
-
-### Recommended Reading Order
-
-1. `README_EN.md` (or `README_ES.md`) - Complete documentation
-2. `DEBUGGING_EN.md` (or `DEBUGGING_ES.md`) - When you encounter problems
-3. Jason documentation - For advanced features
-
----
-
-## Common Initial Problems
-
-### Problem: "No task received"
-
-**Solution:** Check that the scheduler is assigning tasks correctly and using `.send()` or `.broadcast()` to communicate.
-
-### Problem: "Robot doesn't move"
-
-**Solution:** Verify that `move_to(X,Y)` coordinates are within the grid (0-19, 0-14).
-
-### Problem: "Container not picked up"
-
-**Solution:** Check that:
-- Robot is at the correct position
-- Container still exists
-- Robot has sufficient capacity
-
----
-
-## Quick Test Checklist
-
-- [ ] System runs without errors
-- [ ] Containers appear in the GUI
-- [ ] Robots print messages
-- [ ] Scheduler detects containers
-- [ ] Robots receive tasks
-- [ ] Robots move in the GUI
-- [ ] Containers are picked up
-- [ ] Containers are stored
-
----
-
-## Tips for Rapid Development
-
-✅ **Use `.print()` extensively** for debugging
-
-✅ **Test after each small change**
-
-✅ **Start simple, add complexity gradually**
-
-✅ **Keep Jason console visible** to see errors
-
-✅ **Check GUI to verify visual behavior**
-
----
-
-## Ready?
-
-🚀 You're ready to start developing your multi-agent warehouse system!
-
-**Remember:** It's normal to encounter errors. Use `DEBUGGING_EN.md` (or `DEBUGGING_ES.md`) when you get stuck.
-
-**Good luck! 🤖**
+- Check that Java 21 or newer is installed.
+- Run from the project root, where `warehouse.mas2j` is located.
+- Check that Jason 3.3.0 is available in the environment.
+- If Jason is not installed globally, use `gradle run`.

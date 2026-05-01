@@ -1,336 +1,94 @@
-# Debugging Guide and Common Problem Solving
+# Debugging Guide
 
-**Warehouse Project - University of Vigo**
+## First Checks
 
----
+- Run the project with `jason warehouse.mas2j`.
+- Check that the console shows the environment initialization.
+- Check that the GUI opens if the machine is not headless.
+- Check that all agents in `warehouse.mas2j` have a matching `.asl` file.
 
-## 🔍 Debugging Techniques in Jason
+Current agents:
 
-### 1. Using .print()
+- `robot_light`
+- `robot_medium`
+- `robot_heavy_1`
+- `robot_heavy_2`
+- `scheduler`
+- `supervisor`
+- `transport`
 
-The most basic but effective debugging:
+## Useful Console Checks
 
-```asl
-// Print variable values
-+!my_plan : variable(X) <-
-    .print("Value of X: ", X);
-    ...
+The system should print events with this format:
 
-// Print at key points
-+!complex_process : true <-
-    .print("[DEBUG] Starting complex process");
-    !step1;
-    .print("[DEBUG] Step 1 completed");
-    !step2;
-    .print("[DEBUG] Step 2 completed").
-
-// Print all current beliefs
-+!debug_beliefs : true <-
-    .print("=== CURRENT BELIEFS ===");
-    .findall(B, B, BeliefList);
-    .print(BeliefList).
+```text
+EVENT | time=T | agent=NAME | type=EVENT_TYPE | data=VALUE
 ```
 
-### 2. Using Jason's Mind Inspector
+Important events:
 
-Jason includes a visual tool to inspect agents:
+- `no_space_detected`
+- `output_phase_started`
+- `deadline_started`
+- `container_delivered`
+- `deadline_missed`
+- `deadline_ended`
 
-1. Run the system
-2. Right-click on the agent in Jason's GUI
-3. Select "Mind Inspector"
-4. View beliefs, plans, intentions in real-time
+## Robot Does Not Store Containers
 
-### 3. Breakpoints with .wait()
+Check:
 
-```asl
-+!critical_phase : true <-
-    .print("BREAKPOINT: Before critical action");
-    .wait(5000);  // 5-second pause to observe
-    critical_action().
-```
+- The robot has a compatible capacity belief in `warehouse.mas2j`.
+- The robot receives `container_available(...)` percepts.
+- The robot calls `claim_storage(CId)`.
+- The environment returns `storage_task(CId,ShelfId)`.
+- The shelf policy allows the container type on that shelf.
 
----
+The scheduler does not assign storage tasks directly. Robots choose available
+containers and claim them.
 
-## Common Problems and Solutions
+## Robot Does Not Deliver During Output
 
-### Problem 1: "Robot doesn't receive tasks"
+Check:
 
-**Symptoms:**
-- Robot calls `request_task()` but never receives `+task(...)`
-- Robot remains in `idle` state indefinitely
+- The supervisor detected a no-space situation.
+- The scheduler opened an output cycle with `open_output_cycle(Type)`.
+- The robot receives `output_candidate(...)`.
+- The robot calls `claim_output(CId)`.
+- The environment returns `output_task(CId,ShelfId,Type)`.
+- The robot reaches outbound and calls `deliver(CId)`.
 
-**Possible causes:**
+## Claim Fails
 
-1. **Scheduler is not assigning tasks**
-   ```asl
-   // Check in scheduler.asl
-   +new_container(CId) : true <-
-       ...
-   ```
+A claim can fail when another robot already claimed the same container or when
+the container is no longer available. This is expected in a multi-robot system.
+The robot should return to `idle` and continue its work cycle.
 
-2. **No containers generated**
-   - Automatic generator may take 5-10 seconds
-   - Check in console: "New container generated: ..."
+## Movement Problems
 
-3. **Robot cannot handle available containers**
-   ```asl
-   // In scheduler, check assignment logic
-   if (Weight <= 10 & robot_available(robot_light)) {
-       .print("[SCHEDULER] Assigning to robot_light");
-       ...
-   }
-   ```
+Check:
 
-**Solution:**
-```asl
-// In robot: add timeout and debug
-+!request_next_task : state(idle) <-
-```
+- Coordinates are inside the grid: `0 <= X < 20`, `0 <= Y < 15`.
+- The target cell is reachable.
+- The robot is not trying to move through shelf cells.
+- Other robots are not blocking the access point for too long.
 
----
+The environment recalculates paths when a cell is busy.
 
-### Problem 2: "Error: container_too_heavy"
+## Deadline Problems
 
-**Symptoms:**
-- Robot tries to pick up container
-- Error: "container_too_heavy"
+Check:
 
-**Cause:**
-Scheduler assigned a container that exceeds robot's capacity.
+- `scheduler.asl` starts the deadline when it opens an output cycle.
+- `supervisor.asl` receives `active_deadline(Type,Deadline)`.
+- Pending containers of the active type still exist after the deadline.
 
-**Solution in scheduler.asl:**
-```asl
-+!assign_task(CId) : 
-    container_info(CId, W, H, Weight, Type)
-<-
-```
+If all containers are delivered before the deadline, no `deadline_missed` event
+is expected.
 
----
+## Common File Mismatches
 
-### Problem 3: "Robot moves outside the grid"
-
-**Symptoms:**
-- Error: "illegal_move"
-- "Position out of bounds"
-
-**Cause:**
-X,Y coordinates outside limits (0-19, 0-14).
-
-**Solution:**
-```asl
-+!move_safe(X, Y) : true <-
-```
-
----
-
-### Problem 4: "Conflicts between robots"
-
-**Symptoms:**
-- Error: "conflict(robot_id)"
-- Two robots try to occupy the same cell
-
-**Basic solution:**
-```asl
-// Add random wait before moving
-+!move_with_retry(X, Y) : true <-
-    move_to(X, Y);
-    .wait(math.random(1000)).  // Random wait 0-1s
-
-// Advanced solution: passing protocol
-+error(conflict, RobotData) : true <-
-    .print("Conflict detected, waiting...");
-    .wait(2000);
-    !retry_movement.
-```
-
----
-
-### Problem 5: "Agent does not respond / Plan never executed"
-
-**Symptoms:**
-- Plan defined but never executes
-- Agent doesn't respond to events
-
-**Causes and solutions:**
-
-1. **Goal not initiated**
-
-2. **Incorrect syntax**
-
-3. **Event not generated**
-
----
-
-### Problem 6: "Infinite loop / Infinite recursion"
-
-**Symptoms:**
-- Console fills with repeated messages
-- System freezes or slows down
-
-**Common cause:**
-```asl
-// RECURSION WITHOUT STOP CONDITION
-+!loop : true <-
-    do_something();
-    !loop.  // Careful! No way to stop
-```
-
-**Solution:**
-```asl
-// With stop condition
-+!loop : counter(N) & N < 10 <-
-    do_something();
-    -+counter(N+1);
-    !loop.
-
-+!loop : counter(N) & N >= 10 <-
-    .print("Loop finished").
-    
-// Or with state
-+!loop : not must_stop <-
-    do_something();
-    .wait(1000);
-    !loop.
-
-+!loop : must_stop <-
-    .print("Stopping loop").
-```
-
----
-
-### Problem 7: "Container/Shelf not found"
-
-**Symptoms:**
-- Error when trying to interact with container or shelf
-- "Robot or container not found"
-
-**Cause:**
-Incorrect ID or wrong string format.
-
-**Solution:**
-```asl
-// Verify IDs with quotes
-pickup("container_1").  // CORRECT
-
-// NOT this:
-pickup(container_1).    // INCORRECT (without quotes)
-
-```
-
----
-
-## 📋 Debugging Checklist
-
-When something doesn't work, check in order:
-
-### □ 1. Syntax
-- [ ] All plans end with a period (.)
-- [ ] Correct use of quotes for strings
-- [ ] Balanced parentheses and brackets
-- [ ] Variable names with initial capital letter
-
-### □ 2. Logic
-- [ ] Plan contexts are met
-- [ ] Goals initiated correctly
-- [ ] Correct if/elif/else conditions
-- [ ] No infinite recursion
-
-### □ 3. Perceptions
-- [ ] Correct perception names
-- [ ] Correct data format
-- [ ] Perceptions updated correctly
-
-### □ 4. Communication
-- [ ] Messages .send() have correct format
-- [ ] Correct agent names
-- [ ] Communication protocols implemented
-
-### □ 5. State
-- [ ] Agent state updated
-- [ ] Beliefs reflect reality
-- [ ] No contradictory beliefs
-
----
-
-## 🛠️ Useful Tools
-
-### Useful commands in plans
-
-```asl
-// Count beliefs
-.count(belief_type(_), Amount)
-
-// Find all beliefs of a type
-.findall(X, my_belief(X), List)
-
-// Current time
-.time(Timestamp)
-
-// Wait for condition
-.wait(condition, Timeout)
-
-// Broadcast to all
-.broadcast(tell, message)
-
-// Suspend plan
-.suspend
-
-// Resume plan
-.resume
-```
-
-### System information
-
-```asl
-+!system_info : true <-
-    .my_name(MyName);
-    .print("My name: ", MyName);
-    
-    .all_names(AllAgents);
-    .print("All agents: ", AllAgents);
-    
-    .intend(Intentions);
-    .print("Current intentions: ", Intentions).
-```
-
----
-
-## 💡 Tips
-
-1. **Use prefixes in logs:**
-   ```asl
-   .print("[ROBOT-LIGHT] Message here")
-   .print("[SCHEDULER] Message there")
-   ```
-
-2. **Log levels:**
-   ```asl
-   .print("[INFO] Normal information")
-   .print("[WARN] Warning")
-   .print("[ERROR] Serious error")
-   .print("[DEBUG] Only during development")
-   ```
-
-3. **Timestamps in important logs:**
-   ```asl
-   +important_event : true <-
-       .time(T);
-       .print("[", T, "] Important event occurred").
-   ```
-
-4. **Save previous states for rollback:**
-   ```asl
-   +!risky_operation : state(E) <-
-       +previous_state(E);  // Backup
-       !change_state;
-       if (failed) {
-           ?previous_state(PS);
-           -+state(PS);  // Restore
-       }.
-   ```
-
----
-
-## **Debugging is part of learning!**
-
----
+- Use `robot_heavy_1.asl` and `robot_heavy_2.asl`, not `robot_heavy.asl`.
+- Use `jason warehouse.mas2j` when Jason is configured in the environment.
+- Use `gradle run` only as an alternative launcher.
+- Use claim-based actions: `claim_storage` and `claim_output`.

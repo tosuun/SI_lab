@@ -35,3 +35,6 @@ temp/
 
 # Generated files
 .jason/
+
+# Local report draft
+doc/MEMORIA_DRAFT_EN.md

@@ -1,139 +1,69 @@
-# **Warehouse Management System - Quick Start Guide**
+# Inicio rapido
 
----
+## Ejecutar
 
-## Inicio en 5 Minutos
-
-### 1. Verificar Instalación
+Desde la raiz del proyecto:
 
 ```bash
-# Verificar Java
-java -version
-# Debe mostrar Java 11 o superior
-
-# Navegar al proyecto
-cd warehouse
-
-# Listar archivos
-ls -la
-```
-
-### 2. Ejecutar el Sistema
-
-```bash
-# Opción 1: Desde terminal
 jason warehouse.mas2j
-
-# Opción 2: Desde Jason directamente
-# Abrir Jason GUI y cargar warehouse.mas2j
 ```
 
-### 3. Observar el Sistema
+Esto inicia el MAS Jason definido en `warehouse.mas2j`.
 
-Al ejecutar, verás:
+Alternativa con Gradle:
 
-1. **Ventana de visualización 2D**: Muestra el almacén con robots y contenedores
-2. **Consola Jason**: Muestra logs de los agentes
-3. **Panel de información**: Estadísticas en tiempo real
-
-**Comportamiento inicial:**
-- Los agentes están con plantillas vacías, así que no harán mucho
-- Se generarán contenedores cada 5-10 segundos
-- Los robots imprimirán mensajes pero no actuarán
-
----
-
-## Tu Primera Implementación (30 minutos)
-
-### Paso 1: Robot Básico (10 min)
-
-Abre `src/agt/robot_light.asl` y descomenta/implementa:
-
-```asl
-// 1. Plan inicial
-+!start : true <-
-    .print("Robot ligero iniciado");
-    !request_next_task.
-
-// 2. Solicitar tareas
-+!request_next_task : state(idle) <-
-    request_task();
-    .wait(2000);
-    !request_next_task.
-
-// 3. Reaccionar a tarea
-+task(CId, ShelfId) : true <-
-    .print("Tarea recibida: ", CId, " -> ", ShelfId);
-    get_container_info(CId);
-    // Por ahora, solo registrar
-    true.
+```bash
+gradle run
 ```
 
-**Ejecuta y verifica:**
-- ✓ Robot imprime "iniciado"
-- ✓ Robot solicita tareas periódicamente
+## Resultado esperado
 
-### Paso 2: Scheduler Básico (10 min)
+- El entorno arranca.
+- Se abre la GUI si la maquina no esta en modo headless.
+- Aparecen contenedores en inbound.
+- Se crean cuatro robots: `robot_light`, `robot_medium`, `robot_heavy_1` y
+  `robot_heavy_2`.
+- Los robots reclaman tareas compatibles y almacenan contenedores.
+- Cuando un tipo no tiene espacio, empieza un ciclo de salida.
 
-Abre `src/agt/scheduler.asl`:
+## Comprobaciones rapidas
 
-```asl
-// 1. Reaccionar a nuevo contenedor
-+new_container(CId) : true <-
-    .print("Nuevo contenedor: ", CId);
-    get_container_info(CId);
-    true.
+Revisar en consola lineas como:
 
-// 2. Recibir info y clasificar
-+container_info(CId, W, H, Weight, Type) : true <-
-    .print("Info: ", CId, " - ", Weight, "kg");
-    +pending_container(CId, Weight).
+```text
+EVENT | time=T | agent=supervisor | type=no_space_detected | data=standard
+EVENT | time=T | agent=scheduler | type=output_phase_started | data=standard
+EVENT | time=T | agent=robot_medium | type=container_delivered | data=container_1
 ```
 
-**Ejecuta y verifica:**
-- ✓ Scheduler detecta nuevos contenedores
-- ✓ Obtiene información correctamente
+## Flujo actual de tareas
 
-### Paso 3: Conexión Scheduler-Robot (10 min)
+Almacenamiento:
 
-En `scheduler.asl`, agregar asignación simple:
-
-```asl
-+container_info(CId, W, H, Weight, Type) : true <-
-    .print("Clasificando ", CId);
-    
-    // Asignar a robot apropiado
-    if (Weight <= 10) {
-        .print("Asignando a robot_light");
-        // Nota: Esta es una simplificación
-        // El scheduler debería verificar disponibilidad
-    }.
+```text
+container_available(...)
+robot -> claim_storage(CId)
+environment -> storage_task(CId,ShelfId)
+robot -> pickup(CId)
+robot -> drop_at(ShelfId)
 ```
 
-En `robot_light.asl`, completar la tarea:
+Salida:
 
-```asl
-+task(CId, ShelfId) : true <-
-    .print("Ejecutando tarea: ", CId);
-    
-    // Paso 1: Ir al contenedor (simplificado)
-    move_to(1, 1);  // Posición aproximada
-    .wait(1000);
-    
-    // Paso 2: Recoger
-    pickup(CId);
-    .wait(1000);
-    
-    // Paso 3: Ir a estantería (simplificado)
-    move_to(10, 2);
-    .wait(1000);
-    
-    // Paso 4: Depositar
-    drop_at(ShelfId).
+```text
+output_candidate(...)
+robot -> claim_output(CId)
+environment -> output_task(CId,ShelfId,Type)
+robot -> pickup(CId)
+robot -> deliver(CId)
 ```
 
-**Ejecuta y verifica:**
-- ✓ Robot recibe tarea
-- ✓ Robot se mueve (ver en GUI)
-- ✓ Robot recoge contenedor
-- ✓ Robot deposita en estantería
+El scheduler abre ciclos de salida, pero no asigna contenedores directamente a
+los robots.
+
+## Si no arranca
+
+- Comprobar que Java 21 o superior esta instalado.
+- Ejecutar desde la raiz del proyecto, donde esta `warehouse.mas2j`.
+- Comprobar que Jason 3.3.0 esta disponible en el entorno.
+- Si Jason no esta instalado globalmente, usar `gradle run`.
